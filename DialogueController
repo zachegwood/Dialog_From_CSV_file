@@ -1,0 +1,270 @@
+/// Made with C# for Unity
+///
+/// Generate a dynamic scene, including camera cuts, given a CSV file
+/// Read dialog lines from CSV.
+/// CSV tracks the speaker, their animation to set, their dialog, and the cam position
+/// All created at runtime during the dialog
+
+
+
+
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.UI;
+
+public class DialogueController : MonoBehaviour {
+
+	//get a reference of who the player has activated
+	//find that NPCs list of dialog keys.
+
+//	public float cinemaCamLocation;
+//	public float camShiftSpeed;  //how fast should the cam pan when dialog starts
+
+	public bool dialogueBoxIsUp = false;
+	public Canvas dialogueBox;
+	public Text dialogueText;
+
+//	public Canvas popupBox; //box containing name and descr of highlighted item
+//	public Text popupNameTxt;
+//	public Text popupDescrTxt;
+
+	public bool cinemaPlaying = false;
+
+	//set this key (from inspector or from another script) 
+	//to set where in the csv the dialogue begins
+	[Space]
+	public string currDialogueKey;
+
+	public int dialogueKeyIndex;
+	private string nextDialogueKey;
+
+	[Space]
+	public int languageColumn;  //which column in CSV holds the text for our language
+	public int camPosColumn;  //which column in CSV holds the code for cam position
+
+	public int npcAnimColumn;  //which column in CSV holds the code for NPC animations
+	public int playerAnimColumn;  //which column in CSV holds the code for player animations
+
+	public string[,] dialogue;
+
+	//private variables
+	private string currentCamPos;  //which OTS is the camera at.  Is the code the same as the CSV for this dialog?
+	private string currentAnim;  //if the current animation is still playing
+	private string nextSpeaker;
+
+	private TypewriterEffect typewriter;
+	private PlayerMovement player;
+	private GameManager gameMan;
+	private CameraMovement camScript;
+	private Activator activator;
+	private NpcScript currNPC;  //which NPC are we reading dialog from?
+
+	private Coroutine typingCoroutine;
+
+	//===================================================================
+	//dont destroy on load, delete copies
+//	private static bool goAlreadyCreated = false;
+//	void Awake() {
+//		if (goAlreadyCreated == false) {
+//			Debug.Log ("first copy");
+//			DontDestroyOnLoad (this.gameObject);
+//			goAlreadyCreated = true;
+//		} else {  //it's a copy; delete it
+//			Debug.Log ("second copy");
+//			Destroy(this.gameObject);
+//		}
+//	}
+	//===================================================================
+
+	// Use this for initialization
+	void Start () {
+
+		player = FindObjectOfType<PlayerMovement> ();
+		gameMan = FindObjectOfType<GameManager> ();
+		activator = player.GetComponentInChildren<Activator> ();
+		camScript = FindObjectOfType<CameraMovement> ();
+		typewriter = GetComponent<TypewriterEffect>();
+	}
+
+	void Update() {
+
+		if (cinemaPlaying == false)
+			return;
+
+		if (dialogueBoxIsUp == true) {
+
+		}
+	}
+
+
+
+	//							ACTUAL XML SCRIPT READING
+	//============================================================================================
+
+	/// CINEMA ENDS WHEN 
+	/// THE SPREADSHEET
+	/// DOESN'T HAVE ANY MORE LINES
+
+	//This gets called ONLY at the beginning of the dialog
+	//use for all setup
+	public void DialogueCinema (string SceneKey, NpcScript thisScriptsNPC) {  //from NpcScript
+
+	//	currDialogueKey = SceneKey;
+			
+				// WHAT THIS DOES:
+				//stop the player from moving themselves
+				//stops the player from moving the camera
+				//chooses the correct dialog key
+				//turns on the dialog box
+
+			activator.alreadyInDialog = true;
+			player.playerCanMove = false;
+			cinemaPlaying = true;
+			camScript.cameraCanMove = false;
+
+		//find locations to look at.
+		//remove Y component, so they don't look UP/DOWN, just AT.
+		Vector3 playerXZ = new Vector3 (player.transform.position.x, thisScriptsNPC.gameObject.transform.position.y, player.transform.position.z);
+		Vector3 npcXZ = new Vector3 (thisScriptsNPC.gameObject.transform.position.x, player.transform.position.y, thisScriptsNPC.gameObject.transform.position.z);
+
+			//force player and NPC to look at each other at start of dialog
+			player.transform.LookAt (npcXZ);
+			thisScriptsNPC.gameObject.transform.LookAt (playerXZ);
+	
+			//set the dialogue box text 
+			//to the appropriate line in the script;
+			//THEN, turn on dialogue box
+			dialogueText.text = thisScriptsNPC.dialogParsedFromCSV [dialogueKeyIndex, languageColumn];
+
+
+			//Set the camera position based on the code within the CSV file.
+			//Player has a Transform GO on it that the camera positions to.
+			//NPC does as well.
+			//Script is in the CAMERAMOVEMENT
+			currentCamPos = thisScriptsNPC.dialogParsedFromCSV [dialogueKeyIndex, camPosColumn];
+
+			TurnOnDialogueBox ();
+
+			ContinueDialog (thisScriptsNPC);
+		}
+
+	//							CONTINUE DIALOG AND CHECK IF FINISHED
+	//=====================================================================
+
+	public void ContinueDialog(NpcScript thisScriptsNPC) {
+
+		currNPC = thisScriptsNPC;
+
+			/// THE WAY THIS WORKS:
+			/// dialogueKeyIndex is set from NpcScript and used above.
+			/// Dialog continues until it finds "_end" in the CSV file
+
+		dialogueKeyIndex++;  //move to next line of dialog
+
+		dialogueText.text = currNPC.dialogParsedFromCSV [dialogueKeyIndex, languageColumn];
+
+
+		//--------------  IF END OF DIALOG -----------------\\
+
+		if (currNPC.dialogParsedFromCSV [dialogueKeyIndex, 0] == "_end" ){
+			
+			cinemaPlaying = false;
+			player.playerCanMove = true;
+			camScript.cameraCanMove = true;
+			TurnOffDialogueBox (); 
+			currDialogueKey = null;  //reset so we don't do the same dialog twice
+
+		}
+
+		// ----------- PLAYER TEXT COLOR  ---------------------\\
+
+			//color text if PLAYER is speaking
+			//otherwise, default to black text
+		if (currNPC.dialogParsedFromCSV [dialogueKeyIndex, 0] == "ANTIK") {
+		
+			dialogueText.color = Color.blue;
+			
+		} else {
+		
+			dialogueText.color = Color.black;
+
+		}
+
+		// ----------- CAMERA POSITION CHANGE  ---------------------\\
+
+		//is this dialog line NOT the same cam position as the previous one?
+		if (currentCamPos != currNPC.dialogParsedFromCSV [dialogueKeyIndex, camPosColumn]) {
+
+			//change variable to the next cam position
+			currentCamPos = currNPC.dialogParsedFromCSV [dialogueKeyIndex, camPosColumn];
+
+			camScript.Dialog_OTS (currentCamPos, currNPC.gameObject.transform);  //move the camera to this position
+		} 
+
+		// ----------- ANIMATION CHANGE  ---------------------\\
+
+		player.anim.ResetTrigger ("IDLE");
+
+		//change NPC animation to one indicated in CSV
+		currNPC.npcAnim.SetTrigger(currNPC.dialogParsedFromCSV [dialogueKeyIndex, npcAnimColumn].ToString());
+
+		//change Player animation to one indicated in CSV (connected to NPC)
+		player.anim.SetTrigger(currNPC.dialogParsedFromCSV [dialogueKeyIndex, playerAnimColumn]);
+
+
+		//-------------- Typewriter Effect -----------\\
+
+		//error prevention, to prevent drawing multiple typings on top of eachother
+		if (typingCoroutine != null)
+			StopCoroutine (typingCoroutine);
+		
+		//typewriter effect
+		typingCoroutine = StartCoroutine (typewriter.TypeText(dialogueText));
+	}
+
+
+
+	//							DIALOG BOX AND TEXT
+	//=============================================================================\\
+		
+	public void TurnOnDialogueBox() {
+
+
+		//now that dialog has begun, 
+		//shift the camera upwards, 
+		//to make space for the text UI 
+		//at the bottom of the phone
+//		camScript.MoveCamForDialog ("up");
+
+		//close the popup Name/Description box
+//		popupBox.gameObject.SetActive(false);
+
+		dialogueBoxIsUp = true;
+		dialogueBox.gameObject.SetActive (true);
+
+//		activator.alreadyInDialog = true;  //error fix.  Explained in Activator script
+	}
+
+	public void TurnOffDialogueBox() {
+
+		//now that dialog has ended, 
+		//shift the camera back, 
+//		camScript.MoveCamForDialog ("down");
+
+		dialogueBoxIsUp = false;
+
+		dialogueBox.gameObject.SetActive (false);
+
+		dialogueKeyIndex++;  
+
+		activator.alreadyInDialog = false; //error fix.  Explained in Activator script
+
+		//cleanup
+		currNPC.currQuest.QuestComplete ();  //end the quest
+		currNPC = null;
+
+	}
+		
+}
